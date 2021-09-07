@@ -9,7 +9,7 @@
 * `slice()` helpers (`slice_head()`, `slice_tail()`, `slice_min()`, `slice_max()` 
    and `slice_sample()`) now accept negative values for `n` and `prop` (#5961).
 
-* New function `is_rowwise_df()`
+* New function `is_rowwise_df()`.
 
 # dplyr 1.0.7
 
