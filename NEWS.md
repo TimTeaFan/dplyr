@@ -11,6 +11,8 @@
 
 * New function `is_rowwise_df()`.
 
+* `slice()` now indicates which group produces an error (#5931).
+
 # dplyr 1.0.7
 
 * `across()` uses the formula environment when inlining them (#5886).

@@ -121,7 +121,7 @@ slice <- function(.data, ..., .preserve = FALSE) {
 
 #' @export
 slice.data.frame <- function(.data, ..., .preserve = FALSE) {
-  loc <- slice_rows(.data, ...)
+  loc <- slice_rows(.data, ..., caller_env = caller_env())
   dplyr_row_slice(.data, loc, preserve = .preserve)
 }
 
@@ -225,46 +225,56 @@ slice_sample.data.frame <- function(.data, ..., n, prop, weight_by = NULL, repla
 # helpers -----------------------------------------------------------------
 
 
-slice_rows <- function(.data, ...) {
+slice_rows <- function(.data, ..., caller_env) {
   dots <- enquos(...)
   if (is_empty(dots)) {
     return(TRUE)
   }
 
-  mask <- DataMask$new(.data, caller_env())
+  mask <- DataMask$new(.data, caller_env)
   on.exit(mask$forget("slice"), add = TRUE)
 
   rows <- mask$get_rows()
 
-  quo <- quo(c(!!!dots))
-  chunks <- mask$eval_all(quo)
-
   slice_indices <- new_list(length(rows))
 
-  for (group in seq_along(rows)) {
-    current_rows <- rows[[group]]
-    res <- chunks[[group]]
+  quo <- quo(c(!!!dots))
+  withCallingHandlers({
+    chunks <- mask$eval_all(quo)
 
-    if (is.logical(res) && all(is.na(res))) {
-      res <- integer()
-    } else if (is.numeric(res)) {
-      res <- vec_cast(res, integer())
-    } else if (!is.integer(res)) {
-      abort("`slice()` expressions should return indices (positive or negative integers).")
+    for (group in seq_along(rows)) {
+      current_rows <- rows[[group]]
+      res <- chunks[[group]]
+
+      if (is.logical(res) && all(is.na(res))) {
+        res <- integer()
+      } else if (is.numeric(res)) {
+        res <- vec_cast(res, integer())
+      } else if (!is.integer(res)) {
+        mask$set_current_group(group)
+        abort("`slice()` expressions should return indices (positive or negative integers).")
+      }
+
+      if (length(res) == 0L) {
+        # nothing to do
+      } else if (all(res >= 0, na.rm = TRUE)) {
+        res <- res[!is.na(res) & res <= length(current_rows) & res > 0]
+      } else if (all(res <= 0, na.rm = TRUE)) {
+        res <- setdiff(seq_along(current_rows), -res)
+      } else {
+        mask$set_current_group(group)
+        abort("`slice()` expressions should return either all positive or all negative.")
+      }
+
+      slice_indices[[group]] <- current_rows[res]
     }
 
-    if (length(res) == 0L) {
-      # nothing to do
-    } else if (all(res >= 0, na.rm = TRUE)) {
-      res <- res[!is.na(res) & res <= length(current_rows) & res > 0]
-    } else if (all(res <= 0, na.rm = TRUE)) {
-      res <- setdiff(seq_along(current_rows), -res)
-    } else {
-      abort("`slice()` expressions should return either all positive or all negative.")
-    }
-
-    slice_indices[[group]] <- current_rows[res]
-  }
+  }, error = function(e) {
+    abort(c(
+      conditionMessage(e),
+      i = cnd_bullet_cur_group_label()
+    ), class = "dplyr_error")
+  })
 
   vec_c(!!!slice_indices, .ptype = integer())
 }
